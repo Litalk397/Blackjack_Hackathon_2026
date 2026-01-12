@@ -5,6 +5,18 @@ class BlackjackClient:
         self.magic_cookie = 0xabcddcba
         self.team_name = team_name.ljust(32)[:32].encode('utf-8')
         self.wins = 0
+        # Card suit emojis
+        self.suit_symbols = {0: '♥️', 1: '♦️', 2: '♣️', 3: '♠️'}
+        self.suit_names = {0: 'Hearts', 1: 'Diamonds', 2: 'Clubs', 3: 'Spades'}
+        # ANSI color codes
+        self.RED = '\033[91m'
+        self.GREEN = '\033[92m'
+        self.YELLOW = '\033[93m'
+        self.BLUE = '\033[94m'
+        self.MAGENTA = '\033[95m'
+        self.CYAN = '\033[96m'
+        self.RESET = '\033[0m'
+        self.BOLD = '\033[1m'
 
     def start_game(self, ip, port, rounds):
         try:
@@ -14,7 +26,9 @@ class BlackjackClient:
                 tcp.sendall(struct.pack('!IbB32s', self.magic_cookie, 0x03, rounds, self.team_name) + b'\n')
                 
                 for r in range(1, rounds + 1):
-                    print(f"\n--- Round {r} ---")
+                    print(f"\n{self.BOLD}{self.CYAN}{'='*40}")
+                    print(f"🎰 ROUND {r} 🎰")
+                    print(f"{'='*40}{self.RESET}")
                     cards_in_round = 0
                     current_player_sum = 0
                     is_my_turn = True
@@ -28,28 +42,36 @@ class BlackjackClient:
                         if status == 0: # הודעת קלף (Payload רגיל)
                             cards_in_round += 1
                             r_name = {1:'A', 11:'J', 12:'Q', 13:'K'}.get(rank, str(rank))
-                            s_name = {0:'Heart', 1:'Diamond', 2:'Club', 3:'Spade'}.get(suit)
-                            card_info = f"{r_name} of {s_name}"
+                            suit_emoji = self.suit_symbols.get(suit, '')
+                            suit_name = self.suit_names.get(suit, 'Unknown')
+                            card_info = f"{r_name}{suit_emoji} of {suit_name}"
+                            
+                            # Color cards by suit
+                            if suit in [0, 1]:  # Hearts, Diamonds - Red
+                                card_color = self.RED
+                            else:  # Clubs, Spades - Blue
+                                card_color = self.BLUE
 
                             if cards_in_round <= 2:
-                                print(f"Your card: {card_info}")
+                                print(f"{self.GREEN}🃏 Your card: {card_color}{card_info}{self.RESET}")
                                 val = 11 if rank == 1 else (10 if rank >= 10 else rank)
                                 current_player_sum += val
                             elif cards_in_round == 3:
-                                print(f"Dealer's visible card: {card_info}")
+                                print(f"{self.YELLOW}🎴 Dealer's visible card: {card_color}{card_info}{self.RESET}")
                             else:
                                 # כאן ההדפסה החשובה: האם זה Hit שלנו או תור הדילר
                                 if is_my_turn:
-                                    print(f"Hit! Received: {card_info}")
+                                    print(f"{self.GREEN}📥 Hit! Received: {card_color}{card_info}{self.RESET}")
                                     val = 11 if rank == 1 else (10 if rank >= 10 else rank)
                                     current_player_sum += val
                                 else:
                                     # הדפסת קלפי הדילר (חשיפת המוסתר ומשיכת קלפים עד 17)
-                                    print(f"Dealer reveals/draws: {card_info}")
+                                    print(f"{self.YELLOW}🎴 Dealer reveals/draws: {card_color}{card_info}{self.RESET}")
 
                             # לוגיקת החלטה
                             if is_my_turn and cards_in_round >= 3 and current_player_sum < 21:
-                                choice = input("Hit(H) or Stand(S)? ").lower().strip()
+                                print(f"{self.MAGENTA}💰 Your current sum: {current_player_sum}{self.RESET}")
+                                choice = input(f"{self.BOLD}Hit(H) or Stand(S)? {self.RESET}").lower().strip()
                                 if choice == 's': 
                                     is_my_turn = False
                                     decision = "Stand"
@@ -61,9 +83,13 @@ class BlackjackClient:
                                 is_my_turn = False # מעבר אוטומטי לתור הדילר או תוצאה
                         
                         else: # הודעת תוצאה (Win/Loss/Tie)
-                            res_msg = {1: "Tie!", 2: "Loss!", 3: "Win!"}.get(status)
-                            print(f"Result: {res_msg}")
-                            if status == 3: self.wins += 1
+                            if status == 1:
+                                print(f"\n{self.YELLOW}{self.BOLD}🤝 Result: TIE!{self.RESET}")
+                            elif status == 2:
+                                print(f"\n{self.RED}{self.BOLD}😞 Result: LOSS!{self.RESET}")
+                            elif status == 3:
+                                print(f"\n{self.GREEN}{self.BOLD}🎉 Result: WIN!{self.RESET}")
+                                self.wins += 1
                             break # סיבוב נגמר
         except Exception as e:
             print(f"Game error: {e}")
@@ -90,13 +116,18 @@ class BlackjackClient:
                 
                 if magic == self.magic_cookie and m_type == 0x02:
                     name = name_raw.decode('utf-8', errors='ignore').strip('\x00').strip()
-                    print(f"Received offer from {name} at {addr[0]}")
+                    print(f"{self.CYAN}✨ Received offer from {self.BOLD}{name}{self.RESET}{self.CYAN} at {addr[0]}{self.RESET}")
                     self.wins = 0
                     self.start_game(addr[0], port, num_rounds)
                     
                     win_rate = (self.wins / num_rounds) * 100 if num_rounds > 0 else 0
-                    print(f"\nFinished playing {num_rounds} rounds, win rate: {win_rate}%")
-                    print("-" * 35)
+                    print(f"\n{self.BOLD}{self.MAGENTA}{'='*40}")
+                    print(f"📊 GAME SUMMARY 📊")
+                    print(f"{'='*40}")
+                    print(f"Rounds Played: {num_rounds}")
+                    print(f"Wins: {self.GREEN}{self.wins}{self.RESET}")
+                    print(f"Win Rate: {self.GREEN}{win_rate:.1f}%{self.RESET}")
+                    print(f"{'='*40}{self.RESET}\n")
 
 if __name__ == "__main__":
     BlackjackClient().run()

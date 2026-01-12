@@ -49,6 +49,16 @@ class BlackjackServer:
 
             # Loop through the number of rounds requested by the client
             for r in range(1, num_rounds + 1):
+                # Create a fresh, shuffled 52-card deck for this round
+                deck = [(rank, suit) for rank in range(1, 14) for suit in range(4)]
+                random.shuffle(deck)
+                
+                def get_card_from_deck():
+                    """Draw a card from the shuffled deck"""
+                    rank, suit = deck.pop()
+                    val = 11 if rank == 1 else (10 if rank >= 10 else rank)
+                    return rank, suit, val
+                
                 player_sum = 0
                 dealer_sum = 0
                 dealer_hidden_card = None
@@ -56,17 +66,17 @@ class BlackjackServer:
                 # --- Game Setup ---
                 # Player: 2 cards face-up
                 for _ in range(2):
-                    rank, suit, val = self.draw_card()
+                    rank, suit, val = get_card_from_deck()
                     player_sum += val
                     self.send_card(conn, rank, suit, 0)
                 
                 # Dealer: first card face-up
-                d1_rank, d1_suit, d1_val = self.draw_card()
+                d1_rank, d1_suit, d1_val = get_card_from_deck()
                 dealer_sum += d1_val
                 self.send_card(conn, d1_rank, d1_suit, 0)
                 
                 # Dealer: second card hidden - drawn but not sent yet
-                dealer_hidden_card = self.draw_card()
+                dealer_hidden_card = get_card_from_deck()
                 dealer_sum += dealer_hidden_card[2]
 
                 # --- Player Turn ---
@@ -84,7 +94,7 @@ class BlackjackServer:
                     
                     # # Player chooses "HIT" - Deal a new card 
                     if choice == "hittt":
-                        rank, suit, val = self.draw_card()
+                        rank, suit, val = get_card_from_deck()
                         player_sum += val
                         self.send_card(conn, rank, suit, 0)
                         if player_sum > 21: break
@@ -98,7 +108,7 @@ class BlackjackServer:
                     self.send_card(conn, dealer_hidden_card[0], dealer_hidden_card[1], 0)
                     # Dealer must hit until the total sum is at least 17
                     while dealer_sum < 17:
-                        r, s, v = self.draw_card()
+                        r, s, v = get_card_from_deck()
                         dealer_sum += v
                         self.send_card(conn, r, s, 0)
 
