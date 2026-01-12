@@ -1,11 +1,45 @@
 import socket, struct
 
+# Protocol constants
+MAGIC_COOKIE = 0xabcddcba
+UDP_PORT = 13122
+TCP_TIMEOUT = 60
+TEAM_NAME_LENGTH = 32
+
+# Message types
+MSG_TYPE_OFFER = 0x02
+MSG_TYPE_REQUEST = 0x03
+MSG_TYPE_PAYLOAD = 0x04
+
+# Game status codes
+STATUS_CARD = 0
+STATUS_TIE = 1
+STATUS_LOSS = 2
+STATUS_WIN = 3
+
+# Decision strings
+DECISION_HIT = b"Hittt"
+DECISION_STAND = b"Stand"
+
 class BlackjackClient:
+    """BlackJack client for connecting to game servers and playing multiple rounds.
+    
+    The client listens for UDP broadcasts from servers and initiates TCP connections
+    to play BlackJack games with colored console output and win rate tracking.
+    """
+    
     def __init__(self, team_name="Joker"):
-        self.magic_cookie = 0xabcddcba
+        """Initialize the BlackJack client.
+        
+        Args:
+            team_name (str): The client's team name (max 32 characters).
+        """
+        self.magic_cookie = MAGIC_COOKIE
         # Pad team name to 32 bytes with null bytes (per protocol specification)
-        self.team_name = (team_name.ljust(32, '\x00')[:32]).encode('utf-8')
+        self.team_name = (team_name.ljust(TEAM_NAME_LENGTH, '\x00')[:TEAM_NAME_LENGTH]).encode('utf-8')
         self.wins = 0
+        self.losses = 0
+        self.ties = 0
         # Card suit emojis
         self.suit_symbols = {0: '♥️', 1: '♦️', 2: '♣️', 3: '♠️'}
         self.suit_names = {0: 'Hearts', 1: 'Diamonds', 2: 'Clubs', 3: 'Spades'}
@@ -20,33 +54,46 @@ class BlackjackClient:
         self.BOLD = '\033[1m'
 
     def start_game(self, ip, port, rounds):
-        """
-        Connects to the server via TCP and manages the game loop for the specified number of rounds.
+        """Connects to the server via TCP and manages the game loop for the specified number of rounds.
         Handles protocol parsing, user input validation, and game state management.
         """
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp:
-                tcp.settimeout(60)
+                tcp.settimeout(TCP_TIMEOUT)
                 tcp.connect((ip, port))
-                # Step 6: Send game request
-                tcp.sendall(struct.pack('!IbB32s', self.magic_cookie, 0x03, rounds, self.team_name) + b'\n')
+                # Send game request
+                tcp.sendall(struct.pack('!IbB32s', self.magic_cookie, MSG_TYPE_REQUEST, rounds, self.team_name))
                 
                 for r in range(1, rounds + 1):
                     print(f"\n{self.BOLD}{self.CYAN}{'='*40}")
                     print(f"🎰 ROUND {r} 🎰")
                     print(f"{'='*40}{self.RESET}")
-                    cards_in_round = 0
+                    
+                    # Proper state management
+                    player_cards_received = 0
+                    dealer_cards_received = 0
+                    dealer_turn = False
                     current_player_sum = 0
-                    is_my_turn = True
                     
                     while True:
-                        data = tcp.recv(9) # Server format: Magic(4), Type(1), Status(1), Rank(2), Suit(1)
-                        if not data or len(data) < 9: break
+                        data = tcp.recv(9)
+                        if not data:
+                            print(f"{self.RED}Server disconnected. Returning to listening mode.{self.RESET}")
+                            return
                         
-                        _, _, status, rank, suit = struct.unpack('!IbBHB', data)
+                        if len(data) < 9:
+                            print(f"{self.RED}Invalid packet received. Connection error.{self.RESET}")
+                            return
                         
-                        if status == 0: # Card message (Regular Payload)
-                            cards_in_round += 1
+                        magic, m_type, status, rank, suit = struct.unpack('!IbBHB', data)
+                        
+                        # Validate message
+                        if magic != self.magic_cookie or m_type != MSG_TYPE_PAYLOAD:
+                            print(f"{self.RED}Protocol error: Invalid message received.{self.RESET}")
+                            return
+                        
+                        if status == STATUS_CARD:
+                            # Format card info
                             r_name = {1:'A', 11:'J', 12:'Q', 13:'K'}.get(rank, str(rank))
                             suit_emoji = self.suit_symbols.get(suit, '')
                             suit_name = self.suit_names.get(suit, 'Unknown')
@@ -58,63 +105,79 @@ class BlackjackClient:
                             else:  # Clubs, Spades - Blue
                                 card_color = self.BLUE
 
-                            if cards_in_round <= 2:
-                                print(f"{self.GREEN}🃏 Your card: {card_color}{card_info}{self.RESET}")
-                                val = 11 if rank == 1 else (10 if rank >= 10 else rank)
-                                current_player_sum += val
-                            elif cards_in_round == 3:
-                                print(f"{self.YELLOW}🎴 Dealer's visible card: {card_color}{card_info}{self.RESET}")
-                            else:
-                                # Important print: Is this our Hit or dealer's turn?
-                                if is_my_turn:
+                            # State-based card identification
+                            if not dealer_turn:
+                                if player_cards_received < 2:
+                                    # First 2 cards are player's
+                                    print(f"{self.GREEN}🃏 Your card: {card_color}{card_info}{self.RESET}")
+                                    val = 11 if rank == 1 else (10 if rank >= 10 else rank)
+                                    current_player_sum += val
+                                    player_cards_received += 1
+                                elif dealer_cards_received == 0:
+                                    # Third card is dealer's visible card
+                                    print(f"{self.YELLOW}🎴 Dealer's visible card: {card_color}{card_info}{self.RESET}")
+                                    dealer_cards_received += 1
+                                else:
+                                    # Additional player cards (Hit)
                                     print(f"{self.GREEN}📥 Hit! Received: {card_color}{card_info}{self.RESET}")
                                     val = 11 if rank == 1 else (10 if rank >= 10 else rank)
                                     current_player_sum += val
-                                else:
-                                    # Print dealer cards (reveal hidden card and draw cards until 17)
-                                    print(f"{self.YELLOW}🎴 Dealer reveals/draws: {card_color}{card_info}{self.RESET}")
+                                    player_cards_received += 1
+                            else:
+                                # Dealer's turn: hidden card reveal + additional draws
+                                print(f"{self.YELLOW}🎴 Dealer reveals/draws: {card_color}{card_info}{self.RESET}")
+                                dealer_cards_received += 1
 
                             # Decision logic
-                            if is_my_turn and cards_in_round >= 3 and current_player_sum < 21:
+                            if not dealer_turn and dealer_cards_received > 0 and current_player_sum < 21:
                                 print(f"{self.MAGENTA}💰 Your current sum: {current_player_sum}{self.RESET}")
-                                # Validate user input - only accept 'h' or 's'
+                                
+                                # Validate user input
                                 while True:
                                     choice = input(f"{self.BOLD}Hit(H) or Stand(S)? {self.RESET}").lower().strip()
                                     if choice in ['h', 's']:
                                         break
                                     print(f"{self.RED}❌ Invalid input. Please enter 'H' for Hit or 'S' for Stand.{self.RESET}")
                                 
-                                if choice == 's': 
-                                    is_my_turn = False
-                                    decision = "Stand"
-                                else: 
-                                    decision = "Hittt"
-                                # Send decision (10 bytes)
-                                tcp.sendall(struct.pack('!Ib5s', self.magic_cookie, 0x04, decision.encode()))
+                                if choice == 's':
+                                    dealer_turn = True
+                                    tcp.sendall(struct.pack('!Ib5s', self.magic_cookie, MSG_TYPE_PAYLOAD, DECISION_STAND))
+                                else:
+                                    tcp.sendall(struct.pack('!Ib5s', self.magic_cookie, MSG_TYPE_PAYLOAD, DECISION_HIT))
+                            
                             elif current_player_sum >= 21:
-                                is_my_turn = False # Automatic transition to dealer's turn or result
+                                # Automatic transition to dealer's turn
+                                dealer_turn = True
                         
-                        else: # Result message (Win/Loss/Tie)
-                            if status == 1:
+                        else:
+                            # Result message
+                            if status == STATUS_TIE:
                                 print(f"\n{self.YELLOW}{self.BOLD}🤝 Result: TIE!{self.RESET}")
-                            elif status == 2:
+                                self.ties += 1
+                            elif status == STATUS_LOSS:
                                 print(f"\n{self.RED}{self.BOLD}😞 Result: LOSS!{self.RESET}")
-                            elif status == 3:
+                                self.losses += 1
+                            elif status == STATUS_WIN:
                                 print(f"\n{self.GREEN}{self.BOLD}🎉 Result: WIN!{self.RESET}")
                                 self.wins += 1
-                            break # Round ended
+                            break
+        
+        except socket.timeout:
+            print(f"{self.RED}Connection timeout. Server not responding.{self.RESET}")
+        except ConnectionResetError:
+            print(f"{self.RED}Connection reset by server.{self.RESET}")
         except Exception as e:
-            print(f"Game error: {e}")
+            print(f"{self.RED}Game error: {e}{self.RESET}")
 
     def run(self):
-        """
-        Main client loop: listens for server offers via UDP broadcast and initiates games.
+        """Main client loop: listens for server offers via UDP broadcast and initiates games.
         Handles multiple game sessions and displays final statistics.
         """
         while True:
             try:
                 user_input = input("\nHow many rounds would you like to play? (or type 'exit' to quit): ").strip()
-                if user_input.lower() == 'exit': break
+                if user_input.lower() == 'exit':
+                    break
                 num_rounds = int(user_input)
             except ValueError:
                 print("Please enter a valid number.")
@@ -123,21 +186,47 @@ class BlackjackClient:
             print("Client started, listening for offer requests...")
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
                 udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                try: udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-                except: pass
+                try:
+                    udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                except:
+                    pass
                 
-                udp.bind(('', 13122))
+                udp.bind(('', UDP_PORT))
                 data, addr = udp.recvfrom(1024)
+                
+                if len(data) < 39:
+                    print(f"{self.RED}Invalid offer packet received.{self.RESET}")
+                    continue
+                
                 magic, m_type, port, name_raw = struct.unpack('!IbH32s', data[:39])
                 
-                if magic == self.magic_cookie and m_type == 0x02:
+                if magic == self.magic_cookie and m_type == MSG_TYPE_OFFER:
                     name = name_raw.decode('utf-8', errors='ignore').strip('\x00').strip()
                     print(f"{self.CYAN}✨ Received offer from {self.BOLD}{name}{self.RESET}{self.CYAN} at {addr[0]}{self.RESET}")
+                    
+                    # Reset statistics
                     self.wins = 0
+                    self.losses = 0
+                    self.ties = 0
+                    
                     self.start_game(addr[0], port, num_rounds)
                     
-                    win_rate = (self.wins / num_rounds) * 100 if num_rounds > 0 else 0
-                    print(f"Finished playing {num_rounds} rounds, win rate: {win_rate:.1f}%")
+                    # Display full statistics
+                    total = self.wins + self.losses + self.ties
+                    if total > 0:
+                        win_rate = (self.wins / total) * 100
+                        loss_rate = (self.losses / total) * 100
+                        tie_rate = (self.ties / total) * 100
+                        
+                        print(f"\n{self.BOLD}{self.CYAN}{'='*50}")
+                        print(f"📊 GAME STATISTICS")
+                        print(f"{'='*50}{self.RESET}")
+                        print(f"{self.GREEN}Wins: {self.wins} ({win_rate:.1f}%){self.RESET}")
+                        print(f"{self.RED}Losses: {self.losses} ({loss_rate:.1f}%){self.RESET}")
+                        print(f"{self.YELLOW}Ties: {self.ties} ({tie_rate:.1f}%){self.RESET}")
+                        print(f"{self.CYAN}Total rounds: {total}{self.RESET}")
+                    else:
+                        print(f"{self.YELLOW}No rounds completed.{self.RESET}")
 
 if __name__ == "__main__":
     BlackjackClient().run()
