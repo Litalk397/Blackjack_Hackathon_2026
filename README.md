@@ -19,15 +19,15 @@ A client-server implementation of the Blackjack card game using TCP sockets. The
 
 ##  Game Rules & Flow
 ### Card Values
-* **Number cards (2-10)**: Numeric value[cite: 26].
-* **Face cards (J, Q, K)**: 10 points[cite: 27].
-* **Ace (A)**: 11 points[cite: 29].
-* **Suits**: Heart, Diamond, Club, Spade[cite: 31].
+* **Number cards (2-10)**: Numeric value.
+* **Face cards (J, Q, K)**: 10 points.
+* **Ace (A)**: 11 points.
+* **Suits**: Heart, Diamond, Club, Spade.
 
 ### Round Flow
 1.  **Initial Deal**: Player receives 2 cards face-up Dealer receives 2 cards: one face-up and one hidden 
 2.  **Player Turn**: Choose "Hit" to draw or "Stand" to stop. Sum > 21 results in an immediate bust and loss.
-3.  **Dealer Turn**: If player didn't bust, dealer reveals the hidden card]. Dealer hits if sum < 17 and stands if sum ≥ 17.
+3.  **Dealer Turn**: If player didn't bust, dealer reveals the hidden card. Dealer hits if sum < 17 and stands if sum ≥ 17.
 4.  **Winner Decision**: 
     * Player bust → Dealer wins.
     * Dealer bust → Player wins.
