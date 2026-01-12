@@ -26,8 +26,9 @@ class BlackjackClient:
         """
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp:
+                tcp.settimeout(60)
                 tcp.connect((ip, port))
-                # שלב 6: שליחת בקשת המשחק
+                # Step 6: Send game request
                 tcp.sendall(struct.pack('!IbB32s', self.magic_cookie, 0x03, rounds, self.team_name) + b'\n')
                 
                 for r in range(1, rounds + 1):
@@ -39,12 +40,12 @@ class BlackjackClient:
                     is_my_turn = True
                     
                     while True:
-                        data = tcp.recv(9) # פורמט שרת: Magic(4), Type(1), Status(1), Rank(2), Suit(1)
+                        data = tcp.recv(9) # Server format: Magic(4), Type(1), Status(1), Rank(2), Suit(1)
                         if not data or len(data) < 9: break
                         
                         _, _, status, rank, suit = struct.unpack('!IbBHB', data)
                         
-                        if status == 0: # הודעת קלף (Payload רגיל)
+                        if status == 0: # Card message (Regular Payload)
                             cards_in_round += 1
                             r_name = {1:'A', 11:'J', 12:'Q', 13:'K'}.get(rank, str(rank))
                             suit_emoji = self.suit_symbols.get(suit, '')
@@ -64,16 +65,16 @@ class BlackjackClient:
                             elif cards_in_round == 3:
                                 print(f"{self.YELLOW}🎴 Dealer's visible card: {card_color}{card_info}{self.RESET}")
                             else:
-                                # כאן ההדפסה החשובה: האם זה Hit שלנו או תור הדילר
+                                # Important print: Is this our Hit or dealer's turn?
                                 if is_my_turn:
                                     print(f"{self.GREEN}📥 Hit! Received: {card_color}{card_info}{self.RESET}")
                                     val = 11 if rank == 1 else (10 if rank >= 10 else rank)
                                     current_player_sum += val
                                 else:
-                                    # הדפסת קלפי הדילר (חשיפת המוסתר ומשיכת קלפים עד 17)
+                                    # Print dealer cards (reveal hidden card and draw cards until 17)
                                     print(f"{self.YELLOW}🎴 Dealer reveals/draws: {card_color}{card_info}{self.RESET}")
 
-                            # לוגיקת החלטה
+                            # Decision logic
                             if is_my_turn and cards_in_round >= 3 and current_player_sum < 21:
                                 print(f"{self.MAGENTA}💰 Your current sum: {current_player_sum}{self.RESET}")
                                 # Validate user input - only accept 'h' or 's'
@@ -88,12 +89,12 @@ class BlackjackClient:
                                     decision = "Stand"
                                 else: 
                                     decision = "Hittt"
-                                # שליחת החלטה (10 בתים)
+                                # Send decision (10 bytes)
                                 tcp.sendall(struct.pack('!Ib5s', self.magic_cookie, 0x04, decision.encode()))
                             elif current_player_sum >= 21:
-                                is_my_turn = False # מעבר אוטומטי לתור הדילר או תוצאה
+                                is_my_turn = False # Automatic transition to dealer's turn or result
                         
-                        else: # הודעת תוצאה (Win/Loss/Tie)
+                        else: # Result message (Win/Loss/Tie)
                             if status == 1:
                                 print(f"\n{self.YELLOW}{self.BOLD}🤝 Result: TIE!{self.RESET}")
                             elif status == 2:
@@ -101,7 +102,7 @@ class BlackjackClient:
                             elif status == 3:
                                 print(f"\n{self.GREEN}{self.BOLD}🎉 Result: WIN!{self.RESET}")
                                 self.wins += 1
-                            break # סיבוב נגמר
+                            break # Round ended
         except Exception as e:
             print(f"Game error: {e}")
 
@@ -136,13 +137,7 @@ class BlackjackClient:
                     self.start_game(addr[0], port, num_rounds)
                     
                     win_rate = (self.wins / num_rounds) * 100 if num_rounds > 0 else 0
-                    print(f"\n{self.BOLD}{self.MAGENTA}{'='*40}")
-                    print(f"📊 GAME SUMMARY 📊")
-                    print(f"{'='*40}")
-                    print(f"Rounds Played: {num_rounds}")
-                    print(f"Wins: {self.GREEN}{self.wins}{self.RESET}")
-                    print(f"Win Rate: {self.GREEN}{win_rate:.1f}%{self.RESET}")
-                    print(f"{'='*40}{self.RESET}\n")
+                    print(f"Finished playing {num_rounds} rounds, win rate: {win_rate:.1f}%")
 
 if __name__ == "__main__":
     BlackjackClient().run()
