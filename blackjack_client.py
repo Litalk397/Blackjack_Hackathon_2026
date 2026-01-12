@@ -3,7 +3,8 @@ import socket, struct
 class BlackjackClient:
     def __init__(self, team_name="Joker"):
         self.magic_cookie = 0xabcddcba
-        self.team_name = team_name.ljust(32)[:32].encode('utf-8')
+        # Pad team name to 32 bytes with null bytes (per protocol specification)
+        self.team_name = (team_name.ljust(32, '\x00')[:32]).encode('utf-8')
         self.wins = 0
         # Card suit emojis
         self.suit_symbols = {0: '♥️', 1: '♦️', 2: '♣️', 3: '♠️'}
@@ -19,6 +20,10 @@ class BlackjackClient:
         self.BOLD = '\033[1m'
 
     def start_game(self, ip, port, rounds):
+        """
+        Connects to the server via TCP and manages the game loop for the specified number of rounds.
+        Handles protocol parsing, user input validation, and game state management.
+        """
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp:
                 tcp.connect((ip, port))
@@ -71,7 +76,13 @@ class BlackjackClient:
                             # לוגיקת החלטה
                             if is_my_turn and cards_in_round >= 3 and current_player_sum < 21:
                                 print(f"{self.MAGENTA}💰 Your current sum: {current_player_sum}{self.RESET}")
-                                choice = input(f"{self.BOLD}Hit(H) or Stand(S)? {self.RESET}").lower().strip()
+                                # Validate user input - only accept 'h' or 's'
+                                while True:
+                                    choice = input(f"{self.BOLD}Hit(H) or Stand(S)? {self.RESET}").lower().strip()
+                                    if choice in ['h', 's']:
+                                        break
+                                    print(f"{self.RED}❌ Invalid input. Please enter 'H' for Hit or 'S' for Stand.{self.RESET}")
+                                
                                 if choice == 's': 
                                     is_my_turn = False
                                     decision = "Stand"
@@ -95,6 +106,10 @@ class BlackjackClient:
             print(f"Game error: {e}")
 
     def run(self):
+        """
+        Main client loop: listens for server offers via UDP broadcast and initiates games.
+        Handles multiple game sessions and displays final statistics.
+        """
         while True:
             try:
                 user_input = input("\nHow many rounds would you like to play? (or type 'exit' to quit): ").strip()

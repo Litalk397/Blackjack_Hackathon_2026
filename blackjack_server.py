@@ -3,7 +3,8 @@ import socket, struct, threading, time, random
 class BlackjackServer:
     def __init__(self, team_name="TeamIronMan"):
         self.magic_cookie = 0xabcddcba
-        self.team_name = team_name.ljust(32)[:32].encode('utf-8')
+        # Pad team name to 32 bytes with null bytes (per protocol specification)
+        self.team_name = (team_name.ljust(32, '\x00')[:32]).encode('utf-8')
         self.tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.tcp_sock.bind(('0.0.0.0', 0))
@@ -39,11 +40,25 @@ class BlackjackServer:
         conn.sendall(packet)
 
     def handle_client(self, conn, addr):
+        """
+        Handles a client connection: validates protocol, manages game rounds, and processes player decisions.
+        Sets timeout to prevent zombie connections and validates all incoming packets against magic cookie.
+        """
+        conn.settimeout(60)  # Prevent zombie connections - 60 second timeout
         try:
             # Receive the initial game request from the client
             data = conn.recv(1024)
             if not data: return
             magic, m_type, num_rounds, team_raw = struct.unpack('!IbB32s', data[:38])
+            
+            # Validate Magic Cookie and Message Type (Protocol Security)
+            if magic != self.magic_cookie:
+                print(f"Invalid Magic Cookie received from {addr[0]}. Dropping.")
+                return
+            if m_type != 0x03:  # 0x03 = Request message type
+                print(f"Invalid Message Type received from {addr[0]}. Dropping.")
+                return
+            
             client_name = team_raw.decode('utf-8').strip('\x00').strip()
             print(f"Accepted connection from {addr[0]} ({client_name}). Playing {num_rounds} rounds.")
 
@@ -90,6 +105,12 @@ class BlackjackServer:
                     
                     # Unpack the decision string
                     magic_c, m_t, decision = struct.unpack('!Ib5s', decision_data[:10])
+                    
+                    # Validate Magic Cookie in decision packet
+                    if magic_c != self.magic_cookie:
+                        print(f"Invalid Magic Cookie in decision from {addr[0]}. Dropping.")
+                        break
+                    
                     choice = decision.decode().strip('\x00').lower()
                     
                     # # Player chooses "HIT" - Deal a new card 
@@ -123,8 +144,10 @@ class BlackjackServer:
                 # Send a final packet with the result status (1, 2, or 3)
                 self.send_card(conn, 0, 0, result)
 
+        except socket.timeout:
+            print(f"Connection with {addr[0]} timed out.")
         except Exception as e: 
-            print(f"Error: {e}")
+            print(f"Error handling {addr[0]}: {e}")
         finally: 
             conn.close()
 
