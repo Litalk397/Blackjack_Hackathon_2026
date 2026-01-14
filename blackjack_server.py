@@ -63,7 +63,7 @@ class BlackjackServer:
         # Listen queue of 10 - allows up to 10 incoming connections to queue up waiting for acceptance
         self.tcp_sock.listen(10)
         
-        print(f"Server started, listening on IP: {self.my_ip}")
+        print(f"Server started, listening on IP address: {self.my_ip}")
 
     def draw_card(self):
         """Draw a random card from the deck.
